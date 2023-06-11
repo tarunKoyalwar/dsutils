@@ -42,10 +42,14 @@ type Chunk struct {
 
 // SplitMarkdown splits a Markdown file/folder into chunks and returns a json file with the chunks
 
-var MarkdownInput string // can be a file or a folder
+var (
+	MarkdownInput string // can be a file or a folder
+	Shape         bool   // return the structure of the markdown file (ast dump)
+)
 
 func main() {
 	flag.StringVar(&MarkdownInput, "input", "", "Markdown file or folder to split")
+	flag.BoolVar(&Shape, "shape", false, "Return the structure/shape of the markdown file(ast dump)")
 	flag.Parse()
 
 	if MarkdownInput == "" || !fileutil.FileOrFolderExists(MarkdownInput) {
@@ -107,7 +111,19 @@ func processFileCallback(filename string) error {
 
 	rootNode := mdParser.Parse(text.NewReader(bin))
 
+	if Shape {
+		rootNode.Dump(bin, 0)
+		return nil
+	}
+
 	chunks := dsutils.NewStack[string]()
+
+	SeperatorKind := ast.KindHeading
+
+	// if markdown file does not contain any heading, use paragraph as seperator
+	if !containsHeading(rootNode) {
+		SeperatorKind = ast.KindParagraph
+	}
 
 	// isChunkEmpty := true
 	var buff bytes.Buffer
@@ -122,10 +138,12 @@ func processFileCallback(filename string) error {
 			switch node.Kind() {
 			case ast.KindDocument:
 				return ast.WalkContinue, nil
-			case ast.KindHeading:
-				h1 := node.(*ast.Heading)
-				got := DumpHelper(h1, bin, 0, nil, nil)
-				currentLevel := h1.Level
+			case SeperatorKind:
+				got := DumpHelper(node, bin, 0, nil, nil)
+				var currentLevel int = 1
+				if val, ok := node.(*ast.Heading); ok {
+					currentLevel = val.Level
+				}
 				if currentLevel == 1 || currentLevel == 2 {
 					currentLevel = 1
 				}
@@ -169,6 +187,10 @@ func processFileCallback(filename string) error {
 				// fmt.Printf("got: %v\n", got)
 				buff.WriteString(got)
 
+			case ast.KindCodeBlock:
+				got := DumpHelper(node, bin, 0, nil, nil)
+				buff.WriteString(fmt.Sprintf("\n```\n%v\n", got))
+
 			case ast.KindHTMLBlock:
 				// if isChunkEmpty {
 				// 	isChunkEmpty = false
@@ -189,10 +211,12 @@ func processFileCallback(filename string) error {
 		} else {
 			// fmt.Printf("leaving: %v\n", node.Kind().String())
 			switch node.Kind() {
-			case ast.KindHeading:
+			case SeperatorKind:
 				// isChunkEmpty = false
 				vector.Pop()
 			case ast.KindFencedCodeBlock:
+				buff.WriteString(fmt.Sprintln("```"))
+			case ast.KindCodeBlock:
 				buff.WriteString(fmt.Sprintln("```"))
 			}
 		}
@@ -217,6 +241,19 @@ func processFileCallback(filename string) error {
 	}
 
 	return err
+}
+
+// returns true if the document contains at least one heading
+func containsHeading(rootNode ast.Node) bool {
+	containsHeading := false
+	_ = ast.Walk(rootNode, func(node ast.Node, entering bool) (ast.WalkStatus, error) {
+		if node.Kind() == ast.KindHeading {
+			containsHeading = true
+			return ast.WalkStop, nil
+		}
+		return ast.WalkContinue, nil
+	})
+	return containsHeading
 }
 
 // func nodeCallback(node ast.Node, data []byte, vec *dsutils.Stack[string], buff *bytes.Buffer) {
@@ -273,14 +310,13 @@ func processFileCallback(filename string) error {
 // }
 
 func hasContent(s string) bool {
-	return true
-	// for _, line := range strings.Split(s, "\n") {
-	// 	trimmed := strings.TrimSpace(line)
-	// 	if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
-	// 		return true
-	// 	}
-	// }
-	// return false
+	for _, line := range strings.Split(s, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			return true
+		}
+	}
+	return false
 }
 
 func vec2Markdown(vector *dsutils.Stack[string]) string {
