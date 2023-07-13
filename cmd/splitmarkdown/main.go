@@ -101,7 +101,7 @@ func processFileCallback(filename string) error {
 		return err
 	}
 	vector := dsutils.NewStack[string]()
-	// vector.Push(filepath.Base(filename))
+	vector.Push(filepath.Base(filename))
 
 	mdParser := parser.NewParser(
 		parser.WithBlockParsers(parser.DefaultBlockParsers()...),
@@ -154,7 +154,10 @@ func processFileCallback(filename string) error {
 					if stringsutil.ContainsAnyI(got, "example") {
 						vector.Push(lastHeader)
 					} else {
-						vector.Pop()
+						if vector.Len() > 1 {
+							// do not pop the first element
+							vector.Pop()
+						}
 					}
 				}
 				vector.Push(got)
@@ -212,8 +215,10 @@ func processFileCallback(filename string) error {
 			// fmt.Printf("leaving: %v\n", node.Kind().String())
 			switch node.Kind() {
 			case SeperatorKind:
-				// isChunkEmpty = false
-				vector.Pop()
+				if vector.Len() > 1 {
+					// do not pop the first element
+					vector.Pop()
+				}
 			case ast.KindFencedCodeBlock:
 				buff.WriteString(fmt.Sprintln("```"))
 			case ast.KindCodeBlock:
